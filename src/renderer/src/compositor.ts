@@ -15,6 +15,41 @@ interface CompositorOptions {
   fps?: number
 }
 
+export interface BubbleLayout {
+  diameter: number
+  radius: number
+  padding: number
+  /** Bubble center, in canvas pixels. */
+  cx: number
+  cy: number
+}
+
+/** Pure geometry for the webcam bubble: size + center for a given canvas and corner. */
+export function computeBubbleLayout(
+  width: number,
+  height: number,
+  bubbleScale: number,
+  paddingScale: number,
+  corner: Corner
+): BubbleLayout {
+  const diameter = bubbleScale * height
+  const padding = paddingScale * height
+  const radius = diameter / 2
+  const cx = corner.endsWith('left') ? padding + radius : width - padding - radius
+  const cy = corner.startsWith('top') ? padding + radius : height - padding - radius
+  return { diameter, radius, padding, cx, cy }
+}
+
+/** Cover-fit a source of size vw×vh into a square of side `diameter` (no distortion). */
+export function coverFitSquare(
+  vw: number,
+  vh: number,
+  diameter: number
+): { dw: number; dh: number } {
+  const scale = Math.max(diameter / vw, diameter / vh)
+  return { dw: vw * scale, dh: vh * scale }
+}
+
 /**
  * Draws the screen video full-frame with the webcam composited as a circular
  * bubble in the bottom-left corner, and exposes the result as a MediaStream.
@@ -38,21 +73,20 @@ export function createCompositor(
   let rafId = 0
   let running = true
 
-  const bubbleDiameter = bubbleScale * height
-  const padding = paddingScale * height
-  const radius = bubbleDiameter / 2
-  const cx = corner.endsWith('left') ? padding + radius : width - padding - radius
-  const cy = corner.startsWith('top') ? padding + radius : height - padding - radius
+  const { diameter: bubbleDiameter, radius, cx, cy } = computeBubbleLayout(
+    width,
+    height,
+    bubbleScale,
+    paddingScale,
+    corner
+  )
 
   function drawWebcamBubble(): void {
     const vw = webcamVideo.videoWidth
     const vh = webcamVideo.videoHeight
     if (!vw || !vh) return
 
-    // Cover-fit the webcam into the bubble square (no distortion).
-    const scale = Math.max(bubbleDiameter / vw, bubbleDiameter / vh)
-    const dw = vw * scale
-    const dh = vh * scale
+    const { dw, dh } = coverFitSquare(vw, vh, bubbleDiameter)
     const dx = cx - dw / 2
     const dy = cy - dh / 2
 

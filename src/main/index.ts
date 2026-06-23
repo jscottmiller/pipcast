@@ -1,23 +1,48 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, protocol, session, shell, systemPreferences } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream, type WriteStream } from 'node:fs'
+import { Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { transcodeToMp4 } from './transcode.js'
+import { DEFAULT_SETTINGS, mergeSettings, type PipcastSettings } from './settings.js'
+import { parseRangeHeader } from './range.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /** The desktopCapturer source id the renderer selected for this recording. */
 let selectedSourceId: string | null = null
 
-export interface PipcastSettings {
-  webcamDeviceId?: string
-  micDeviceId?: string
-  bubbleScale: number
-  corner: string
+/**
+ * The recording currently being streamed to disk (or finished and awaiting
+ * review/save). Chunks are appended as they arrive so the full recording is
+ * never buffered in memory; review plays it back via the pipcast-media://
+ * protocol and save moves/transcodes the temp file in place.
+ */
+interface ActiveRecording {
+  stream: WriteStream | null
+  dir: string
+  path: string
+  ext: 'mp4' | 'webm'
+  contentType: string
+}
+let recording: ActiveRecording | null = null
+
+/** Close any open write stream and delete the temp recording directory. */
+async function cleanupRecording(): Promise<void> {
+  const rec = recording
+  recording = null
+  if (!rec) return
+  rec.stream?.destroy()
+  await rm(rec.dir, { recursive: true, force: true }).catch(() => {})
 }
 
-const DEFAULT_SETTINGS: PipcastSettings = { bubbleScale: 0.26, corner: 'bottom-left' }
+// Must run before app is ready: lets the renderer stream the temp recording
+// from disk (with range requests for seeking) instead of holding a Blob URL.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'pipcast-media', privileges: { secure: true, stream: true, supportFetchAPI: true } }
+])
 
 function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -100,8 +125,7 @@ function registerIpc(): void {
 
   ipcMain.handle('load-settings', async (): Promise<PipcastSettings> => {
     try {
-      const raw = await readFile(settingsPath(), 'utf8')
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+      return mergeSettings(await readFile(settingsPath(), 'utf8'))
     } catch {
       return DEFAULT_SETTINGS
     }
@@ -117,37 +141,104 @@ function registerIpc(): void {
     return systemPreferences.getMediaAccessStatus('screen')
   })
 
-  ipcMain.handle(
-    'save-recording',
-    async (_event, payload: { buffer: ArrayBuffer; ext: 'mp4' | 'webm' }) => {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const { canceled, filePath } = await dialog.showSaveDialog({
-        title: 'Save recording',
-        defaultPath: `pipcast-${stamp}.mp4`,
-        filters: [{ name: 'MP4 Video', extensions: ['mp4'] }]
-      })
-
-      if (canceled || !filePath) return { saved: false as const }
-
-      const data = Buffer.from(payload.buffer)
-
-      if (payload.ext === 'mp4') {
-        await writeFile(filePath, data)
-        return { saved: true as const, path: filePath, transcoded: false }
-      }
-
-      // WebM fallback: write to a temp file, transcode to the chosen .mp4, clean up.
-      const dir = await mkdtemp(join(tmpdir(), 'pipcast-'))
-      const tmpWebm = join(dir, 'recording.webm')
-      try {
-        await writeFile(tmpWebm, data)
-        await transcodeToMp4(tmpWebm, filePath)
-        return { saved: true as const, path: filePath, transcoded: true }
-      } finally {
-        await rm(dir, { recursive: true, force: true })
-      }
+  // Open a fresh temp file and stream incoming chunks into it.
+  ipcMain.handle('recording-start', async (_event, ext: 'mp4' | 'webm') => {
+    await cleanupRecording()
+    const dir = await mkdtemp(join(tmpdir(), 'pipcast-'))
+    const path = join(dir, `recording.${ext}`)
+    recording = {
+      stream: createWriteStream(path),
+      dir,
+      path,
+      ext,
+      contentType: ext === 'mp4' ? 'video/mp4' : 'video/webm'
     }
-  )
+  })
+
+  // Append one MediaRecorder chunk; resolves once it's flushed so the renderer
+  // can serialize writes and guarantee the final chunk lands before stop.
+  ipcMain.handle('recording-write', (_event, chunk: ArrayBuffer) => {
+    const rec = recording
+    if (!rec?.stream) return
+    return new Promise<void>((resolve, reject) => {
+      rec.stream!.write(Buffer.from(chunk), (err) => (err ? reject(err) : resolve()))
+    })
+  })
+
+  // Close the write stream; the temp file is now ready for review and save.
+  ipcMain.handle('recording-stop', async () => {
+    const rec = recording
+    if (!rec?.stream) return
+    const stream = rec.stream
+    rec.stream = null
+    await new Promise<void>((resolve, reject) => {
+      stream.once('error', reject)
+      stream.end(() => resolve())
+    })
+  })
+
+  ipcMain.handle('recording-discard', () => cleanupRecording())
+
+  ipcMain.handle('save-recording', async () => {
+    const rec = recording
+    if (!rec) return { saved: false as const }
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Save recording',
+      defaultPath: `pipcast-${stamp}.mp4`,
+      filters: [{ name: 'MP4 Video', extensions: ['mp4'] }]
+    })
+
+    // Keep the recording on cancel so the user can retry Save.
+    if (canceled || !filePath) return { saved: false as const }
+
+    if (rec.ext === 'mp4') {
+      await copyFile(rec.path, filePath)
+      await cleanupRecording()
+      return { saved: true as const, path: filePath, transcoded: false }
+    }
+
+    // WebM fallback: transcode the temp file directly to the chosen .mp4.
+    await transcodeToMp4(rec.path, filePath)
+    await cleanupRecording()
+    return { saved: true as const, path: filePath, transcoded: true }
+  })
+}
+
+/** Stream the active temp recording to the renderer's <video>, with range support. */
+function registerMediaProtocol(): void {
+  protocol.handle('pipcast-media', async (request) => {
+    const rec = recording
+    if (!rec) return new Response(null, { status: 404 })
+
+    const fileSize = (await stat(rec.path)).size
+    const range = parseRangeHeader(request.headers.get('range'), fileSize)
+
+    if (range) {
+      const { start, end } = range
+      const body = Readable.toWeb(createReadStream(rec.path, { start, end })) as unknown as ReadableStream
+      return new Response(body, {
+        status: 206,
+        headers: {
+          'Content-Type': rec.contentType,
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(end - start + 1)
+        }
+      })
+    }
+
+    const body = Readable.toWeb(createReadStream(rec.path)) as unknown as ReadableStream
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': rec.contentType,
+        'Content-Length': String(fileSize),
+        'Accept-Ranges': 'bytes'
+      }
+    })
+  })
 }
 
 app.whenReady().then(async () => {
@@ -158,6 +249,7 @@ app.whenReady().then(async () => {
   }
 
   registerDisplayMediaHandler()
+  registerMediaProtocol()
   registerIpc()
   createWindow()
 
@@ -168,4 +260,9 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// Best-effort: drop any temp recording when quitting.
+app.on('before-quit', () => {
+  void cleanupRecording()
 })

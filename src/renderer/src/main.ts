@@ -1,5 +1,6 @@
 import { Recorder } from './recorder'
 import type { Corner } from './compositor'
+import { formatElapsed } from './time'
 
 const sourceSelect = document.getElementById('source-select') as HTMLSelectElement
 const webcamSelect = document.getElementById('webcam-select') as HTMLSelectElement
@@ -46,9 +47,9 @@ let segmentStart = 0
 let bubbleScale = 0.26
 let corner: Corner = 'bottom-left'
 let previewStream: MediaStream | null = null
-let recordedBlob: Blob | null = null
-let recordedExt: 'mp4' | 'webm' = 'webm'
-let reviewUrl: string | null = null
+let hasRecording = false
+/** Bumps the review URL each take so the <video> doesn't replay a cached stream. */
+let reviewSeq = 0
 
 // Mic level meter (Web Audio).
 let audioCtx: AudioContext | null = null
@@ -91,6 +92,9 @@ function setState(state: AppState): void {
   show(pauseBtn, capturing)
   pauseBtn.disabled = !capturing
   pauseBtn.textContent = state === 'paused' ? 'Resume' : 'Pause'
+  // The meter is hidden during review, so don't burn a rAF loop on it then.
+  if (state === 'reviewing') stopMeter()
+  else startMeter()
 }
 
 /** Mirror the compositor's size + corner placement in the div-based demo. */
@@ -148,13 +152,6 @@ cornerGrid.querySelectorAll<HTMLButtonElement>('button').forEach((btn) => {
 
 window.addEventListener('resize', updateBubbleDemo)
 
-function formatElapsed(ms: number): string {
-  const total = Math.floor(ms / 1000)
-  const mm = String(Math.floor(total / 60)).padStart(2, '0')
-  const ss = String(total % 60).padStart(2, '0')
-  return `${mm}:${ss}`
-}
-
 function renderTimer(): void {
   const live = timerId !== null ? performance.now() - segmentStart : 0
   timerEl.textContent = formatElapsed(elapsedMs + live)
@@ -204,21 +201,34 @@ function setupMeter(stream: MediaStream): void {
   // Analyser is not connected to the destination, so the mic is never played back.
   meterSource = audioCtx.createMediaStreamSource(new MediaStream([track]))
   meterSource.connect(analyser!)
-  if (!meterRaf) {
-    const data = new Uint8Array(analyser!.fftSize)
-    const tick = (): void => {
-      analyser!.getByteTimeDomainData(data)
-      let sum = 0
-      for (let i = 0; i < data.length; i++) {
-        const v = (data[i] - 128) / 128
-        sum += v * v
-      }
-      const rms = Math.sqrt(sum / data.length)
-      micLevel.style.width = `${Math.min(100, Math.round(rms * 180))}%`
-      meterRaf = requestAnimationFrame(tick)
+  startMeter()
+}
+
+/** Run the meter's rAF loop (no-op if not wired yet or already running). */
+function startMeter(): void {
+  if (!analyser || meterRaf) return
+  const data = new Uint8Array(analyser.fftSize)
+  const tick = (): void => {
+    analyser!.getByteTimeDomainData(data)
+    let sum = 0
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128
+      sum += v * v
     }
+    const rms = Math.sqrt(sum / data.length)
+    micLevel.style.width = `${Math.min(100, Math.round(rms * 180))}%`
     meterRaf = requestAnimationFrame(tick)
   }
+  meterRaf = requestAnimationFrame(tick)
+}
+
+/** Stop the meter's rAF loop when the meter isn't on screen (e.g. during review). */
+function stopMeter(): void {
+  if (meterRaf) {
+    cancelAnimationFrame(meterRaf)
+    meterRaf = 0
+  }
+  micLevel.style.width = '0%'
 }
 
 /** Acquire (or swap) the persistent webcam+mic stream that feeds both self-views. */
@@ -326,13 +336,11 @@ function runCountdown(): Promise<void> {
 }
 
 function clearReview(): void {
-  if (reviewUrl) {
-    URL.revokeObjectURL(reviewUrl)
-    reviewUrl = null
-  }
   reviewVideo.removeAttribute('src')
   reviewVideo.load()
-  recordedBlob = null
+  // Drop the temp file on disk (no-op if it was already moved by a successful save).
+  void window.pipcast.discardRecording()
+  hasRecording = false
 }
 
 async function handleStart(): Promise<void> {
@@ -384,11 +392,10 @@ async function handleStop(): Promise<void> {
   timerStop()
   setStatus('Processing…')
   try {
-    const { blob, ext } = await recorder.stop()
-    recordedBlob = blob
-    recordedExt = ext
-    reviewUrl = URL.createObjectURL(blob)
-    reviewVideo.src = reviewUrl
+    await recorder.stop()
+    hasRecording = true
+    // Streamed from the temp file by the main process; bust any cached take.
+    reviewVideo.src = `pipcast-media://recording/${++reviewSeq}`
     setState('reviewing')
     setStatus('Review your recording, then Save, Re-record, or Discard.')
   } catch (err) {
@@ -398,12 +405,11 @@ async function handleStop(): Promise<void> {
 }
 
 async function handleSave(): Promise<void> {
-  if (!recordedBlob) return
+  if (!hasRecording) return
   saveBtn.disabled = true
   setStatus('Saving…')
   try {
-    const buffer = await recordedBlob.arrayBuffer()
-    const result = await window.pipcast.saveRecording(buffer, recordedExt)
+    const result = await window.pipcast.saveRecording()
     if (result.saved) {
       const note = result.transcoded ? ' (transcoded to MP4)' : ''
       setStatus(`Saved to ${result.path}${note}`, 'success')

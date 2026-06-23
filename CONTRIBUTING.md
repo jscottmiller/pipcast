@@ -20,11 +20,11 @@ See the [README](README.md) for permission setup (Screen Recording, Camera, Micr
 
 1. Create a branch off `main` for your change.
 2. Make your change, keeping commits focused and cleanup separate from feature work.
-3. Type-check and build before opening a PR:
+3. Type-check, test, and build before opening a PR:
    ```bash
-   bun run build
+   bun run typecheck && bun run test && bun run build
    ```
-   `build` runs the type-check first, so a clean build is the bar for a PR. There is no separate test or lint step.
+   A clean typecheck + green tests is the bar for a PR. There is no linter.
 4. Open a pull request describing what changed and why. Include before/after notes or a screen recording for UI changes.
 
 ## Coding guidelines
@@ -33,6 +33,7 @@ See the [README](README.md) for permission setup (Screen Recording, Camera, Micr
 - Respect the process boundaries: the renderer talks to Electron only through the typed `window.pipcast` bridge. When you add an IPC channel, update all three of [src/preload/index.ts](src/preload/index.ts), [src/preload/api.d.ts](src/preload/api.d.ts), and the `ipcMain` handler in [src/main/index.ts](src/main/index.ts).
 - Don't tear down the long-lived webcam/mic stream inside the recorder — see the stream-ownership note in [CLAUDE.md](CLAUDE.md).
 - Match the existing style: no framework in the renderer, plain DOM, small focused modules.
+- When adding logic with real branches or edge cases, extract it into a pure helper and cover it with a co-located `*.test.ts` (vitest), rather than leaving it inline in a DOM/Electron-bound module. See the testing notes in [CLAUDE.md](CLAUDE.md).
 
 ## Reporting issues
 

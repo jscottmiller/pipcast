@@ -4,7 +4,7 @@ const MP4_MIME = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2'
 const WEBM_VP9 = 'video/webm;codecs=vp9,opus'
 const WEBM_VP8 = 'video/webm;codecs=vp8,opus'
 
-function pickMime(): { mimeType: string; ext: 'mp4' | 'webm' } {
+export function pickMime(): { mimeType: string; ext: 'mp4' | 'webm' } {
   if (MediaRecorder.isTypeSupported(MP4_MIME)) return { mimeType: MP4_MIME, ext: 'mp4' }
   if (MediaRecorder.isTypeSupported(WEBM_VP9)) return { mimeType: WEBM_VP9, ext: 'webm' }
   return { mimeType: WEBM_VP8, ext: 'webm' }
@@ -24,7 +24,6 @@ function makeHiddenVideo(stream: MediaStream): Promise<HTMLVideoElement> {
 }
 
 export interface RecorderResult {
-  blob: Blob
   ext: 'mp4' | 'webm'
 }
 
@@ -41,7 +40,8 @@ export interface StartOptions {
 
 export class Recorder {
   private recorder: MediaRecorder | null = null
-  private chunks: Blob[] = []
+  /** Serializes chunk writes so they reach disk in order, ending with the final chunk. */
+  private writeChain: Promise<void> = Promise.resolve()
   /** Only the screen stream is owned here; the webcam stream belongs to the caller. */
   private screenStream: MediaStream | null = null
   private compositor: Compositor | null = null
@@ -72,12 +72,25 @@ export class Recorder {
 
     const { mimeType, ext } = pickMime()
     this.ext = ext
-    this.chunks = []
+    this.writeChain = Promise.resolve()
     this.recorder = new MediaRecorder(composed, { mimeType })
+    // Stream each chunk to the temp file on disk rather than buffering in memory.
     this.recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) this.chunks.push(e.data)
+      if (e.data.size > 0) {
+        this.writeChain = this.writeChain.then(() =>
+          e.data.arrayBuffer().then((buf) => window.pipcast.writeRecordingChunk(buf))
+        )
+      }
     }
-    this.recorder.start(1000)
+
+    try {
+      await window.pipcast.startRecording(ext)
+      this.recorder.start(1000)
+    } catch (err) {
+      await window.pipcast.discardRecording()
+      this.cleanup()
+      throw err
+    }
   }
 
   pause(): void {
@@ -96,9 +109,14 @@ export class Recorder {
         return
       }
       recorder.onstop = () => {
-        const blob = new Blob(this.chunks, { type: this.ext === 'mp4' ? 'video/mp4' : 'video/webm' })
-        this.cleanup()
-        resolve({ blob, ext: this.ext })
+        // Flush all pending chunk writes (incl. the final one) before closing the file.
+        this.writeChain
+          .then(() => window.pipcast.stopRecording())
+          .then(() => {
+            this.cleanup()
+            resolve({ ext: this.ext })
+          })
+          .catch(reject)
       }
       recorder.stop()
     })

@@ -2,6 +2,10 @@
 
 A minimal, Loom-style screen + webcam recorder built with Electron. Capture a screen or window with your webcam composited as a circular bubble in the corner, review the take, and save it as an MP4.
 
+<p align="center">
+  <img src="example.png" alt="PipCast recording window" width="380" />
+</p>
+
 ## Features
 
 - Record any screen or window with a live webcam bubble overlay

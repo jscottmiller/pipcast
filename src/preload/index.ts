@@ -23,8 +23,13 @@ const api = {
   getScreenAccess: (): Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'> =>
     ipcRenderer.invoke('get-screen-access'),
   openScreenSettings: (): Promise<void> => ipcRenderer.invoke('open-screen-settings'),
-  saveRecording: (buffer: ArrayBuffer, ext: 'mp4' | 'webm'): Promise<SaveResult> =>
-    ipcRenderer.invoke('save-recording', { buffer, ext }),
+  startRecording: (ext: 'mp4' | 'webm'): Promise<void> =>
+    ipcRenderer.invoke('recording-start', ext),
+  writeRecordingChunk: (chunk: ArrayBuffer): Promise<void> =>
+    ipcRenderer.invoke('recording-write', chunk),
+  stopRecording: (): Promise<void> => ipcRenderer.invoke('recording-stop'),
+  discardRecording: (): Promise<void> => ipcRenderer.invoke('recording-discard'),
+  saveRecording: (): Promise<SaveResult> => ipcRenderer.invoke('save-recording'),
   loadSettings: (): Promise<PipcastSettings> => ipcRenderer.invoke('load-settings'),
   saveSettings: (settings: PipcastSettings): Promise<void> =>
     ipcRenderer.invoke('save-settings', settings)

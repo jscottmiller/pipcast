@@ -5,11 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 - `bun run dev` — start the app with HMR (electron-vite dev)
-- `bun run build` — type-check then bundle main/preload/renderer into `out/`
-- `bun run typecheck` — `tsc --noEmit` across `src` and the vite config
+- `bun run build` — bundle main/preload/renderer into `out/`
+- `bun run typecheck` — `tsc --noEmit` across `src` (includes test files) and the vite config
 - `bun run preview` — run the production build locally
+- `bun run test` — run the vitest suite once; `bun run test:watch` for watch mode. A single file: `bun run test src/main/range.test.ts`
 
-There is no test runner or linter configured. `build` runs `typecheck` as a pre-step, so a clean `bun run build` is the closest thing to a CI gate.
+There is no linter configured. The CI gate is `bun run typecheck && bun run test`.
+
+### Testing approach
+
+The app is GUI/hardware-bound (Electron, `MediaRecorder`, `getUserMedia`, canvas), so the suite tests the **pure logic extracted out of those side-effectful modules** rather than the modules themselves — importing `main.ts` (renderer) or `main/index.ts` would pull in DOM/Electron globals. Tests are co-located as `*.test.ts` (vitest, node environment). Covered units: bubble geometry ([compositor.ts](src/renderer/src/compositor.ts) `computeBubbleLayout`/`coverFitSquare`), MIME selection ([recorder.ts](src/renderer/src/recorder.ts) `pickMime`), timer formatting ([time.ts](src/renderer/src/time.ts)), settings merge ([settings.ts](src/main/settings.ts)), HTTP range parsing ([range.ts](src/main/range.ts)), and ffmpeg args ([transcode.ts](src/main/transcode.ts)). When adding logic with real branches/edge cases, prefer extracting it into a pure helper and testing it over leaving it inline in a side-effectful module.
 
 ## Architecture
 
