@@ -18,12 +18,56 @@ A minimal, Loom-style screen + webcam recorder built with Electron. Capture a sc
 
 ## Getting started
 
+New to the project? Follow these steps to go from nothing to a running app.
+
+### 1. Install Bun
+
+PipCast uses [Bun](https://bun.sh) as its package manager and script runner. If you don't have it yet:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+Restart your terminal, then confirm it's installed:
+
+```bash
+bun --version
+```
+
+### 2. Clone the repository
+
+```bash
+git clone https://github.com/sethdavis512/pipcast.git
+cd pipcast
+```
+
+### 3. Install dependencies
+
 ```bash
 bun install
+```
+
+This also downloads the bundled FFmpeg binary (`ffmpeg-static`) used for WebM-to-MP4 transcoding.
+
+### 4. Start the app
+
+```bash
 bun run dev
 ```
 
-On first launch on macOS, grant Camera and Microphone access when prompted. For screen capture, open **System Settings → Privacy & Security → Screen Recording**, enable PipCast (or **Electron** during development), then quit and relaunch. The app shows an in-window hint with a deep link if the permission is missing.
+An Electron window opens with hot reload enabled — edits to the source refresh the app automatically.
+
+### 5. Grant permissions (macOS)
+
+On first launch, macOS prompts for **Camera** and **Microphone** access — accept both. **Screen Recording** can't be granted from a prompt, so:
+
+1. Open **System Settings → Privacy & Security → Screen Recording**.
+2. Enable **PipCast** (or **Electron** while running in development).
+3. Quit and relaunch the app.
+
+If the permission is missing, the app shows an in-window hint with a button that deep-links straight to the right settings pane, plus a **Retry** button once you've granted it.
+
+You're ready — see [Usage](#usage) to record your first take.
 
 ## Usage
 
