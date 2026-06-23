@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'"
+    />
+    <title>PipCast</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>PipCast</h1>
+
+      <div id="screen-hint" class="hint hidden">
+        <p id="screen-hint-text"></p>
+        <div class="hint-actions">
+          <button id="open-settings-btn" class="ghost">Open Screen Recording settings</button>
+          <button id="retry-btn" class="ghost">Retry</button>
+        </div>
+      </div>
+
+      <label class="field">
+        <span>Screen / window</span>
+        <select id="source-select"></select>
+      </label>
+
+      <label class="field">
+        <span>Webcam</span>
+        <select id="webcam-select"></select>
+      </label>
+
+      <label class="field">
+        <span>Microphone</span>
+        <select id="mic-select"></select>
+        <div class="meter" title="Live mic input level">
+          <div class="meter-fill" id="mic-level"></div>
+        </div>
+      </label>
+
+      <div class="field">
+        <span>Webcam bubble</span>
+        <div class="size-row">
+          <div class="bubble-controls">
+            <div class="control-label">Size</div>
+            <div class="size-toggle" id="size-toggle">
+              <button type="button" data-scale="0.18">S</button>
+              <button type="button" data-scale="0.26" class="active">M</button>
+              <button type="button" data-scale="0.34">L</button>
+            </div>
+            <div class="control-label">Corner</div>
+            <div class="corner-grid" id="corner-grid">
+              <button type="button" data-corner="top-left" aria-label="Top left"></button>
+              <button type="button" data-corner="top-right" aria-label="Top right"></button>
+              <button type="button" data-corner="bottom-left" class="active" aria-label="Bottom left"></button>
+              <button type="button" data-corner="bottom-right" aria-label="Bottom right"></button>
+            </div>
+          </div>
+          <div class="bubble-demo" id="bubble-demo" title="Approximate placement on your screen">
+            <span class="bubble-demo-label">your screen</span>
+            <div class="bubble-demo-circle" id="bubble-demo-circle">
+              <video id="bubble-demo-video" muted autoplay playsinline></video>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="preview">
+        <video id="self-view" muted autoplay playsinline></video>
+        <canvas id="preview" class="hidden"></canvas>
+        <video id="review-video" class="hidden" controls></video>
+        <span id="preview-placeholder" class="hidden">Preview appears while recording</span>
+        <div id="countdown" class="countdown hidden"></div>
+      </div>
+
+      <div class="controls" id="controls-record">
+        <button id="start-btn">Start recording</button>
+        <button id="stop-btn" disabled>Stop</button>
+        <button id="pause-btn" class="ghost hidden">Pause</button>
+        <span id="timer" class="timer">00:00</span>
+      </div>
+
+      <div class="controls hidden" id="controls-review">
+        <button id="save-btn">Save</button>
+        <button id="rerecord-btn" class="ghost">Re-record</button>
+        <button id="discard-btn" class="ghost">Discard</button>
+      </div>
+
+      <p id="status" class="status"></p>
+    </main>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

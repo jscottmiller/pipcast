@@ -1,0 +1,41 @@
+import { spawn } from 'node:child_process'
+import ffmpegStatic from 'ffmpeg-static'
+
+/**
+ * Transcode a WebM recording to MP4 (H.264 / AAC).
+ * Only used as a fallback when the runtime can't record MP4 directly.
+ */
+export function transcodeToMp4(input: string, output: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ffmpegPath = ffmpegStatic as unknown as string | null
+    if (!ffmpegPath) {
+      reject(new Error('ffmpeg-static binary not found'))
+      return
+    }
+
+    const args = [
+      '-y',
+      '-i', input,
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      output
+    ]
+
+    const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+
+    let stderr = ''
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+
+    proc.on('error', reject)
+    proc.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`ffmpeg exited with code ${code}\n${stderr.slice(-2000)}`))
+    })
+  })
+}
