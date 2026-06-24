@@ -1,5 +1,29 @@
 import { describe, it, expect } from 'vitest'
-import { buildFfmpegArgs } from './transcode'
+import { buildFfmpegArgs, resolveUnpackedPath } from './transcode'
+
+describe('resolveUnpackedPath', () => {
+  it('rewrites the app.asar segment to app.asar.unpacked (posix)', () => {
+    expect(
+      resolveUnpackedPath('/Applications/PipCast.app/Contents/Resources/app.asar/node_modules/ffmpeg-static/ffmpeg')
+    ).toBe('/Applications/PipCast.app/Contents/Resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg')
+  })
+
+  it('rewrites the app.asar segment on Windows backslash paths', () => {
+    expect(
+      resolveUnpackedPath('C:\\Users\\Jo\\AppData\\Local\\Temp\\PipCast\\resources\\app.asar\\node_modules\\ffmpeg-static\\ffmpeg.exe')
+    ).toBe('C:\\Users\\Jo\\AppData\\Local\\Temp\\PipCast\\resources\\app.asar.unpacked\\node_modules\\ffmpeg-static\\ffmpeg.exe')
+  })
+
+  it('leaves dev paths (no asar segment) unchanged', () => {
+    const dev = '/home/dev/pipcast/node_modules/ffmpeg-static/ffmpeg'
+    expect(resolveUnpackedPath(dev)).toBe(dev)
+  })
+
+  it('does not touch "app.asar" appearing only as a substring of a dir name', () => {
+    const tricky = '/home/app.asar-backup/node_modules/ffmpeg-static/ffmpeg'
+    expect(resolveUnpackedPath(tricky)).toBe(tricky)
+  })
+})
 
 describe('buildFfmpegArgs', () => {
   const args = buildFfmpegArgs('/tmp/in.webm', '/tmp/out.mp4')

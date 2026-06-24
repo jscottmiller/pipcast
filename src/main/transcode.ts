@@ -1,6 +1,20 @@
 import { spawn } from 'node:child_process'
 import ffmpegStatic from 'ffmpeg-static'
 
+/**
+ * Rewrite a path that points inside the asar archive to its unpacked sibling.
+ *
+ * In a packaged build `ffmpeg-static` resolves to a path under `app.asar/`, but
+ * the binary is actually extracted to `app.asar.unpacked/` (see `asarUnpack` in
+ * electron-builder.yml). Only an `app.asar` path *segment* (bounded by slashes)
+ * is rewritten, so an install dir or username that merely contains the substring
+ * "app.asar" is left alone. In dev there is no asar segment and the path is
+ * returned unchanged.
+ */
+export function resolveUnpackedPath(p: string): string {
+  return p.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2')
+}
+
 /** Build the ffmpeg argument list to transcode `input` to an MP4 at `output`. */
 export function buildFfmpegArgs(input: string, output: string): string[] {
   return [
@@ -27,10 +41,7 @@ export function transcodeToMp4(input: string, output: string): Promise<void> {
       reject(new Error('ffmpeg-static binary not found'))
       return
     }
-    // In a packaged build the binary lives in app.asar.unpacked (see asarUnpack
-    // in electron-builder.yml); the resolved path still points at app.asar, so
-    // rewrite it. No-op in dev where the path contains no asar segment.
-    const ffmpegPath = bundled.replace('app.asar', 'app.asar.unpacked')
+    const ffmpegPath = resolveUnpackedPath(bundled)
 
     const args = buildFfmpegArgs(input, output)
 

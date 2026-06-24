@@ -1,4 +1,4 @@
-appId: com.cowboyscott.pipcast
+appId: com.pipcast
 productName: PipCast
 directories:
   output: dist
