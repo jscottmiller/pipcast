@@ -19,6 +19,7 @@ A minimal, Loom-style screen + webcam recorder built with Electron. Capture a sc
 
 - [Bun](https://bun.sh) (used as the package manager and script runner)
 - macOS is the primary target. On macOS you must grant **Screen Recording**, **Camera**, and **Microphone** permission to the app.
+- Windows is supported and can be packaged as a standalone portable `.exe` — see [Building a standalone Windows app](#building-a-standalone-windows-app).
 
 ## Getting started
 
@@ -86,8 +87,41 @@ You're ready — see [Usage](#usage) to record your first take.
 | --- | --- |
 | `bun run dev` | Start the app in development with hot reload |
 | `bun run build` | Type-check and bundle for production into `out/` |
+| `bun run build:win` | Bundle and package a standalone Windows portable `.exe` into `dist/` |
 | `bun run preview` | Run the production build locally |
 | `bun run typecheck` | Type-check without emitting |
+
+## Building a standalone Windows app
+
+PipCast packages into a single portable `.exe` (no installer, no admin rights — run it from anywhere) via [electron-builder](https://www.electron.build).
+
+Build **on Windows**, not under WSL/Linux. The bundled FFmpeg (`ffmpeg-static`) downloads a platform-specific binary at install time, so installing on Windows is what fetches the Windows ffmpeg that ends up in the package.
+
+```powershell
+git clone https://github.com/sethdavis512/pipcast.git
+cd pipcast
+bun install
+bun run build:win
+```
+
+The portable executable lands in `dist/` as `PipCast-<version>-portable.exe`. ffmpeg is unpacked alongside the app (`app.asar.unpacked`) so the WebM→MP4 fallback works from the packaged build.
+
+To brand the executable, drop a 256×256 (or larger) `build/icon.ico` in place before building — electron-builder picks it up automatically. Without it, the default Electron icon is used.
+
+### Building in CI
+
+You don't need a Windows machine — GitHub Actions builds the exe on a Windows runner:
+
+- **[`build-windows.yml`](.github/workflows/build-windows.yml)** — runs on demand (Actions → *Build Windows* → *Run workflow*) or when you push a `v*` tag. It uploads the portable exe as a workflow artifact, and on a tag also attaches it to a GitHub Release.
+- **[`ci.yml`](.github/workflows/ci.yml)** — runs `typecheck` + `test` on every push to `main` and on PRs.
+
+To cut a release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 
 ## How it works
 

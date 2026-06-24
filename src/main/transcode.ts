@@ -22,11 +22,15 @@ export function buildFfmpegArgs(input: string, output: string): string[] {
  */
 export function transcodeToMp4(input: string, output: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const ffmpegPath = ffmpegStatic as unknown as string | null
-    if (!ffmpegPath) {
+    const bundled = ffmpegStatic as unknown as string | null
+    if (!bundled) {
       reject(new Error('ffmpeg-static binary not found'))
       return
     }
+    // In a packaged build the binary lives in app.asar.unpacked (see asarUnpack
+    // in electron-builder.yml); the resolved path still points at app.asar, so
+    // rewrite it. No-op in dev where the path contains no asar segment.
+    const ffmpegPath = bundled.replace('app.asar', 'app.asar.unpacked')
 
     const args = buildFfmpegArgs(input, output)
 

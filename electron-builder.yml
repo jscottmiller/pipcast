@@ -1,0 +1,21 @@
+appId: com.cowboyscott.pipcast
+productName: PipCast
+directories:
+  output: dist
+  buildResources: build
+# electron-vite emits the bundled app into out/. Ship that plus package.json;
+# production dependencies (incl. ffmpeg-static) are pulled in automatically.
+files:
+  - out/**
+  - package.json
+  - '!**/*.{map,md,ts}'
+# The ffmpeg binary can't be spawned from inside the asar archive, so unpack it
+# to app.asar.unpacked/ — transcode.ts rewrites the path to match.
+asarUnpack:
+  - '**/node_modules/ffmpeg-static/**'
+win:
+  target:
+    - portable
+  icon: build/icon.ico
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
